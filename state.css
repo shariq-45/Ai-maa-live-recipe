@@ -1,0 +1,393 @@
+// Live Recipe AI - State Management
+// Centralized state management for the cooking assistant
+
+const AppState = {
+    // Cooking state
+    isCooking: false,
+    isPaused: false,
+    currentStep: 0,
+    totalSteps: 0,
+    waitingForConfirmation: false,
+    
+    // Recipe data
+    recipe: {
+        name: '',
+        ingredients: [],
+        steps: [],
+        estimatedTime: 0
+    },
+    
+    // User preferences
+    preferences: {
+        voiceEnabled: true,
+        cameraEnabled: true,
+        aiSpeechEnabled: true,
+        language: 'hinglish', // hinglish, english, hindi
+    },
+    
+    // UI state
+    ui: {
+        currentView: 'welcome', // welcome, cooking, complete
+        isLoading: false,
+        loadingMessage: '',
+        error: null
+    },
+    
+    // Conversation history
+    conversation: [],
+    
+    // Camera state
+    camera: {
+        stream: null,
+        isActive: false,
+        lastCapture: null,
+        captureCount: 0
+    },
+    
+    // Speech state
+    speech: {
+        isListening: false,
+        recognitionActive: false,
+        speechActive: true,
+        lastUtterance: null
+    },
+    
+    // AI context
+    aiContext: {
+        messages: [],
+        lastResponse: null,
+        visionContext: []
+    },
+    
+    // Initialize state
+    init() {
+        console.log('Initializing App State...');
+        
+        // Load preferences from localStorage if available
+        this.loadPreferences();
+        
+        // Initialize conversation with welcome message
+        this.conversation = [
+            {
+                role: 'ai',
+                text: 'Namaste! I\'m ChefMate, your kitchen assistant. Ready to cook together? Let\'s start by clicking "Start Cooking" below.',
+                timestamp: new Date().toISOString()
+            }
+        ];
+        
+        this.updateUI();
+    },
+    
+    // Load preferences from localStorage
+    loadPreferences() {
+        try {
+            const saved = localStorage.getItem('chefmate_preferences');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                this.preferences = { ...this.preferences, ...parsed };
+            }
+        } catch (error) {
+            console.warn('Failed to load preferences:', error);
+        }
+    },
+    
+    // Save preferences to localStorage
+    savePreferences() {
+        try {
+            localStorage.setItem('chefmate_preferences', JSON.stringify(this.preferences));
+        } catch (error) {
+            console.warn('Failed to save preferences:', error);
+        }
+    },
+    
+    // Start cooking session
+    startCooking(dishName) {
+        this.isCooking = true;
+        this.isPaused = false;
+        this.currentStep = 0;
+        this.waitingForConfirmation = true;
+        this.ui.currentView = 'cooking';
+        
+        // Initialize empty recipe
+        this.recipe = {
+            name: dishName || 'Custom Dish',
+            ingredients: [],
+            steps: [],
+            estimatedTime: 0
+        };
+        
+        this.addToConversation('ai', `Shuru karte hain! Let's make ${dishName || 'this delicious dish'}. Pehle ingredients check karte hain.`);
+        this.updateUI();
+    },
+    
+    // Pause cooking
+    pauseCooking() {
+        this.isPaused = !this.isPaused;
+        if (this.isPaused) {
+            this.addToConversation('ai', 'Main pause kar raha hun. Jab ready ho, resume kar dena.');
+        } else {
+            this.addToConversation('ai', 'Resume kar diya! Chaliye aage badhte hain.');
+        }
+        this.updateUI();
+    },
+    
+    // Reset cooking
+    resetCooking() {
+        this.isCooking = false;
+        this.isPaused = false;
+        this.currentStep = 0;
+        this.waitingForConfirmation = false;
+        this.recipe = {
+            name: '',
+            ingredients: [],
+            steps: [],
+            estimatedTime: 0
+        };
+        this.conversation = [
+            {
+                role: 'ai',
+                text: 'Cooking session reset. Ready to start fresh? Click "Start Cooking" to begin!',
+                timestamp: new Date().toISOString()
+            }
+        ];
+        this.ui.currentView = 'welcome';
+        this.updateUI();
+    },
+    
+    // Go to next step
+    nextStep() {
+        if (this.currentStep < this.totalSteps - 1) {
+            this.currentStep++;
+            this.waitingForConfirmation = true;
+            this.updateUI();
+            return true;
+        } else if (this.currentStep === this.totalSteps - 1) {
+            this.completeCooking();
+        }
+        return false;
+    },
+    
+    // Go to previous step
+    prevStep() {
+        if (this.currentStep > 0) {
+            this.currentStep--;
+            this.waitingForConfirmation = true;
+            this.updateUI();
+            return true;
+        }
+        return false;
+    },
+    
+    // Complete cooking
+    completeCooking() {
+        this.isCooking = false;
+        this.ui.currentView = 'complete';
+        this.addToConversation('ai', 'Badhai ho! Dish taiyar hai. Aapne bahut accha banaya. Kaisa laga experience?');
+        this.updateUI();
+    },
+    
+    // Update recipe with AI response
+    updateRecipe(recipeData) {
+        if (recipeData.name) {
+            this.recipe.name = recipeData.name;
+        }
+        if (recipeData.ingredients && Array.isArray(recipeData.ingredients)) {
+            this.recipe.ingredients = recipeData.ingredients.map(ing => ({
+                name: ing.name || ing,
+                quantity: ing.quantity || 'As needed',
+                checked: false
+            }));
+        }
+        if (recipeData.steps && Array.isArray(recipeData.steps)) {
+            this.recipe.steps = recipeData.steps.map((step, index) => ({
+                number: index + 1,
+                description: step,
+                completed: false
+            }));
+            this.totalSteps = recipeData.steps.length;
+        }
+        if (recipeData.estimatedTime) {
+            this.recipe.estimatedTime = recipeData.estimatedTime;
+        }
+        
+        this.updateUI();
+    },
+    
+    // Mark ingredient as checked
+    toggleIngredient(index) {
+        if (this.recipe.ingredients[index]) {
+            this.recipe.ingredients[index].checked = !this.recipe.ingredients[index].checked;
+            this.updateUI();
+        }
+    },
+    
+    // Mark step as completed
+    completeCurrentStep() {
+        if (this.recipe.steps[this.currentStep]) {
+            this.recipe.steps[this.currentStep].completed = true;
+            this.waitingForConfirmation = false;
+            this.updateUI();
+        }
+    },
+    
+    // Add message to conversation
+    addToConversation(role, text) {
+        const message = {
+            role: role,
+            text: text,
+            timestamp: new Date().toISOString()
+        };
+        
+        this.conversation.push(message);
+        
+        // Keep conversation to last 50 messages
+        if (this.conversation.length > 50) {
+            this.conversation = this.conversation.slice(-50);
+        }
+        
+        // Update AI context
+        this.aiContext.messages.push({
+            role: role === 'ai' ? 'model' : 'user',
+            parts: [{ text: text }]
+        });
+        
+        // Keep AI context manageable
+        if (this.aiContext.messages.length > 20) {
+            this.aiContext.messages = this.aiContext.messages.slice(-20);
+        }
+        
+        // Trigger UI update
+        this.updateUI();
+    },
+    
+    // Add vision context
+    addVisionContext(description) {
+        const context = {
+            type: 'vision',
+            description: description,
+            timestamp: new Date().toISOString()
+        };
+        
+        this.aiContext.visionContext.push(context);
+        
+        // Keep last 5 vision contexts
+        if (this.aiContext.visionContext.length > 5) {
+            this.aiContext.visionContext = this.aiContext.visionContext.slice(-5);
+        }
+        
+        // Also add to conversation
+        this.addToConversation('system', `[Vision] ${description}`);
+    },
+    
+    // Update UI based on state
+    updateUI() {
+        // This will be called by app.js to update the DOM
+        // The actual DOM updates are handled in app.js
+        if (typeof window.updateUIFromState === 'function') {
+            window.updateUIFromState(this);
+        }
+    },
+    
+    // Set loading state
+    setLoading(isLoading, message = '') {
+        this.ui.isLoading = isLoading;
+        this.ui.loadingMessage = message;
+        this.updateUI();
+    },
+    
+    // Set error state
+    setError(error) {
+        this.ui.error = error;
+        this.addToConversation('system', `Error: ${error}`);
+        this.updateUI();
+    },
+    
+    // Clear error
+    clearError() {
+        this.ui.error = null;
+        this.updateUI();
+    },
+    
+    // Toggle microphone
+    toggleMicrophone() {
+        this.preferences.voiceEnabled = !this.preferences.voiceEnabled;
+        this.savePreferences();
+        this.updateUI();
+    },
+    
+    // Toggle camera
+    toggleCamera() {
+        this.preferences.cameraEnabled = !this.preferences.cameraEnabled;
+        this.savePreferences();
+        this.updateUI();
+    },
+    
+    // Toggle AI speech
+    toggleAISpeech() {
+        this.preferences.aiSpeechEnabled = !this.preferences.aiSpeechEnabled;
+        this.savePreferences();
+        this.updateUI();
+    },
+    
+    // Get current step text
+    getCurrentStepText() {
+        if (this.recipe.steps && this.recipe.steps[this.currentStep]) {
+            return this.recipe.steps[this.currentStep].description;
+        }
+        return 'Waiting for instructions...';
+    },
+    
+    // Get progress percentage
+    getProgressPercentage() {
+        if (this.totalSteps === 0) return 0;
+        return Math.round((this.currentStep / this.totalSteps) * 100);
+    },
+    
+    // Check if camera should analyze
+    shouldAnalyzeCamera() {
+        // Analyze every 5th step or when explicitly asked
+        return this.currentStep % 5 === 0 || 
+               this.waitingForConfirmation ||
+               this.camera.captureCount < 3; // First few steps
+    },
+    
+    // Get system prompt for AI
+    getSystemPrompt() {
+        return `You are ChefMate, a live cooking assistant.
+
+Rules:
+- Guide cooking one step at a time
+- Never skip or merge steps
+- Always wait for user confirmation
+- Speak in friendly Hinglish
+- Be calm, supportive, human
+- Fix mistakes gently
+- If camera shows something wrong, politely correct
+- Never say you are an AI
+- Never give long explanations
+- Keep responses under 3 sentences
+- Use cooking terms in Hindi/English mix
+- Always ask before moving to next step
+- If user says "dekho" or "look", analyze the camera
+
+Current context:
+- Dish: ${this.recipe.name || 'Not decided yet'}
+- Step ${this.currentStep + 1} of ${this.totalSteps || '?'}
+- ${this.waitingForConfirmation ? 'Waiting for user confirmation' : 'Ready for next instruction'}
+
+Your success is making the user feel
+they are not alone in the kitchen.`;
+    }
+};
+
+// Make AppState globally available
+window.AppState = AppState;
+
+// Initialize on load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => AppState.init());
+} else {
+    AppState.init();
+}
+
+export { AppState };
